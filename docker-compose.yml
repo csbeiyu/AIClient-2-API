@@ -1,0 +1,46 @@
+version: '3.8'
+
+services:
+  aiclient2api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: aiclient2api
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+      - "8085-8087:8085-8087"
+      - "1455:1455"
+      - "19876-19880:19876-19880"
+    volumes:
+      - ./configs:/app/configs
+      - ./logs:/app/logs
+    environment:
+      - ARGS=
+    healthcheck:
+      test: ["CMD", "node", "healthcheck.js"]
+      interval: 30s
+      timeout: 3s
+      start_period: 10s
+      retries: 3
+    networks:
+      - aiclient-network
+
+  # 自动更新监控
+  watchtower:
+    image: containrrr/watchtower:latest
+    container_name: aiclient-watchtower
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - WATCHTOWER_POLL_INTERVAL=3600
+      - WATCHTOWER_MONITOR_ONLY=true
+      - WATCHTOWER_INCLUDE_STOPPED=false
+    command: aiclient2api --label-enable
+    networks:
+      - aiclient-network
+
+networks:
+  aiclient-network:
+    driver: bridge

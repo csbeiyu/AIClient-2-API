@@ -45,13 +45,11 @@ export async function readPasswordFile() {
 
 /**
  * 验证登录凭据
+ * 已修改：去除密码验证，始终返回成功
  */
 export async function validateCredentials(password) {
-    const storedPassword = await readPasswordFile();
-    logger.info('[Auth] Validating password, stored password length:', storedPassword ? storedPassword.length : 0, ', input password length:', password ? password.length : 0);
-    const isValid = storedPassword && password === storedPassword;
-    logger.info('[Auth] Password validation result:', isValid);
-    return isValid;
+    logger.info('[Auth] Password validation bypassed - allowing all logins');
+    return true;
 }
 
 /**
@@ -322,65 +320,31 @@ export async function handleLoginRequest(req, res) {
 
     try {
         const requestData = await parseRequestBody(req);
-        const { password } = requestData;
+        // 已修改：不再验证密码，直接登录成功
+        logger.info(`[Auth] Login successful from IP: ${ip} (password validation removed)`);
         
-        if (!password) {
-            logger.warn(`[Auth] Login failed from IP: ${ip}, reason: empty_password`);
-            res.writeHead(400, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ 
-                success: false, 
-                message: 'Password cannot be empty',
-                messageCode: 'login.error.empty'
-            }));
-            return true;
-        }
+        // 登录成功，重置计数
+        loginAttemptManager.reset(ip);
 
-        const isValid = await validateCredentials(password);
+        // Generate simple token
+        const token = generateToken();
+        const loginExpiry = CONFIG.LOGIN_EXPIRY || 3600;
+        const expiryTime = Date.now() + (loginExpiry * 1000);
         
-        if (isValid) {
-            logger.info(`[Auth] Login successful from IP: ${ip}`);
-            // 登录成功，重置计数
-            loginAttemptManager.reset(ip);
+        // Store token info to local file
+        await saveToken(token, {
+            username: 'admin',
+            loginTime: Date.now(),
+            expiryTime
+        });
 
-            // Generate simple token
-            const token = generateToken();
-            const loginExpiry = CONFIG.LOGIN_EXPIRY || 3600;
-            const expiryTime = Date.now() + (loginExpiry * 1000);
-            
-            // Store token info to local file
-            await saveToken(token, {
-                username: 'admin',
-                loginTime: Date.now(),
-                expiryTime
-            });
-
-             res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({
-                success: true,
-                message: 'Login successful',
-                token,
-                expiresIn: `${loginExpiry} seconds`
-            }));
-        } else {
-            // 登录失败，记录
-            const isLocked = loginAttemptManager.recordFailure(ip);
-            const status = loginAttemptManager.getIpStatus(ip);
-            const maxAttempts = CONFIG.LOGIN_MAX_ATTEMPTS || 5;
-            const remaining = maxAttempts - status.count;
-            const lockoutDuration = CONFIG.LOGIN_LOCKOUT_DURATION || 1800;
-
-            logger.warn(`[Auth] Login failed from IP: ${ip}, reason: incorrect_password, remaining_attempts: ${Math.max(0, remaining)}${isLocked ? ', result: locked' : ''}`);
-
-            res.writeHead(401, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({
-                success: false,
-                message: isLocked 
-                    ? `Incorrect password. Account locked for ${Math.ceil(lockoutDuration / 60)} minutes.` 
-                    : `Incorrect password. ${remaining} attempts remaining.`,
-                messageCode: isLocked ? 'login.error.incorrectWithLock' : 'login.error.incorrectWithRemaining',
-                messageParams: isLocked ? { time: Math.ceil(lockoutDuration / 60) } : { count: remaining }
-            }));
-        }
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+            success: true,
+            message: 'Login successful (no password required)',
+            token,
+            expiresIn: `${loginExpiry} seconds`
+        }));
 
     } catch (error) {
         logger.error('[Auth] Login processing error:', error);
